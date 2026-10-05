@@ -82,3 +82,67 @@ export function fmtControlDate(isoDate) {
 export function issuesOf(item) {
   return SLOT_CHECKS.filter((c) => item[c.key] === false).map((c) => c.issue);
 }
+
+// ---------------------------------------------------------------------
+// Períodos (semana / mes) para el panel de resúmenes
+// ---------------------------------------------------------------------
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+// Lunes de la semana que contiene la fecha dada (semana lunes a domingo).
+export function startOfWeek(isoDate) {
+  const dow = new Date(`${isoDate}T12:00:00Z`).getUTCDay(); // 0 = domingo
+  return addDays(isoDate, -((dow + 6) % 7));
+}
+
+export function weekRange(isoDate) {
+  const from = startOfWeek(isoDate);
+  return { from, to: addDays(from, 6) };
+}
+
+// ym = 'YYYY-MM'
+export function monthRange(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const from = `${ym}-01`;
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { from, to: `${ym}-${String(last).padStart(2, '0')}` };
+}
+
+export function addMonths(ym, n) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+export function fmtMonthLabel(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const name = MESES[m - 1];
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${y}`;
+}
+
+export function fmtShortDate(isoDate) {
+  const [, m, d] = isoDate.split('-');
+  return `${d}/${m}`;
+}
+
+// Fechas del rango [from, to] que ya empezaron (no incluye días futuros).
+export function datesUpToToday(from, to) {
+  const today = currentControlDate();
+  const out = [];
+  let d = from;
+  while (d <= to && d <= today) {
+    out.push(d);
+    d = addDays(d, 1);
+  }
+  return out;
+}
+
+// Cuántos controles se esperaban por sucursal en el rango: 3 horarios por
+// día, y para hoy solo los horarios que ya arrancaron.
+export function expectedChecksPerBranch(from, to) {
+  return datesUpToToday(from, to).reduce((sum, d) => sum + SLOT_TIMES.filter((s) => !isSlotInFuture(d, s)).length, 0);
+}
+
+// Igual, pero para un horario puntual: días del rango en los que ese horario ya arrancó.
+export function expectedDaysForSlot(from, to, slot) {
+  return datesUpToToday(from, to).filter((d) => !isSlotInFuture(d, slot)).length;
+}
