@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth.jsx';
 import { ROLE_LABEL } from '../lib/format.js';
 import {
   IconDashboard, IconCamera, IconBuilding, IconAlert, IconClipboard,
-  IconTrophy, IconMap, IconReport, IconUsers, IconAudit, IconSettings,
+  IconTrophy, IconMap, IconReport, IconUsers, IconAudit, IconSettings, IconSlot,
 } from './icons.jsx';
 
 const NAV = [
@@ -12,8 +12,10 @@ const NAV = [
   // entrar a "/" el sistema lo redirige directo a Monitoreo (ver Home.jsx),
   // así que mostrarle también este ítem era un acceso duplicado que
   // parecía "no hacer nada" al hacer clic estando ya en Monitoreo.
-  { to: '/', label: 'Dashboard', Icon: IconDashboard, roles: ['admin', 'supervisor', 'rrhh'] },
+  { to: '/', label: 'Dashboard', Icon: IconDashboard, roles: ['admin', 'supervisor', 'rrhh', 'tragamonedas'] },
   { to: '/monitoreo', label: 'Monitoreo', Icon: IconCamera, roles: ['admin', 'supervisor', 'monitoreo'] },
+  { to: '/tragamonedas', label: 'Tragamonedas', Icon: IconSlot, roles: ['admin', 'monitoreo'] },
+  { to: '/tragamonedas/panel', label: 'Panel tragamonedas', Icon: IconSlot, roles: ['admin'] },
   { to: '/sucursales', label: 'Sucursales', Icon: IconBuilding, roles: ['admin', 'supervisor'] },
   { to: '/incidencias', label: 'Incidencias', Icon: IconAlert, roles: ['admin', 'supervisor'] },
   { to: '/historial', label: 'Verificaciones', Icon: IconClipboard, roles: ['admin', 'supervisor', 'monitoreo'] },
@@ -74,7 +76,7 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
 
         <nav className="flex flex-col gap-px overflow-y-auto">
           {visible.map(({ to, label, Icon }) => (
-            <NavLink key={to} to={to} end={to === '/'} onClick={onClose} className={({ isActive }) => `navitem ${isActive ? 'active' : ''}`}>
+            <NavLink key={to} to={to} end={to === '/' || to === '/tragamonedas'} onClick={onClose} className={({ isActive }) => `navitem ${isActive ? 'active' : ''}`}>
               <Icon /> {label}
             </NavLink>
           ))}

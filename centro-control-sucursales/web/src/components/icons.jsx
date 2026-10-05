@@ -104,3 +104,13 @@ export const IconSearch = (p) => (
     <circle cx="11" cy="11" r="7" /><line x1="16.2" y1="16.2" x2="21" y2="21" />
   </svg>
 );
+
+export const IconSlot = (p) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...base} {...p}>
+    <rect x="4" y="3" width="13" height="18" rx="2" />
+    <rect x="6.5" y="6" width="8" height="5" rx="1" />
+    <line x1="9.2" y1="6" x2="9.2" y2="11" strokeWidth="1.3" /><line x1="11.8" y1="6" x2="11.8" y2="11" strokeWidth="1.3" />
+    <line x1="7" y1="15.5" x2="14" y2="15.5" strokeWidth="1.5" />
+    <path d="M20 8v5" /><circle cx="20" cy="7" r="1.1" fill="currentColor" stroke="none" />
+  </svg>
+);

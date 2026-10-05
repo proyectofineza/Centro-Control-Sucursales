@@ -39,8 +39,8 @@ export const STATUS_BADGE = {
   con_incidencia: 'badge-orange',
 };
 
-export const ROLE_LABEL = { admin: 'Administrador', supervisor: 'Supervisor', monitoreo: 'Monitoreo', rrhh: 'RRHH' };
-export const ROLE_BADGE = { admin: 'badge-brand', supervisor: 'badge-amber', monitoreo: 'badge-green', rrhh: 'badge-orange' };
+export const ROLE_LABEL = { admin: 'Administrador', supervisor: 'Supervisor', monitoreo: 'Monitoreo', rrhh: 'RRHH', tragamonedas: 'Tragamonedas' };
+export const ROLE_BADGE = { admin: 'badge-brand', supervisor: 'badge-amber', monitoreo: 'badge-green', rrhh: 'badge-orange', tragamonedas: 'badge-red' };
 
 export function scoreColor(score) {
   if (score >= 80) return '#22e2a0';

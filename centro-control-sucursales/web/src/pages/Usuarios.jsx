@@ -5,7 +5,7 @@ import Badge from '../components/Badge.jsx';
 import { ROLE_LABEL, fmtDateTime } from '../lib/format.js';
 import { IconPlus } from '../components/icons.jsx';
 
-const ROLES = ['admin', 'supervisor', 'monitoreo', 'rrhh'];
+const ROLES = ['admin', 'supervisor', 'monitoreo', 'rrhh', 'tragamonedas'];
 const EMPTY_FORM = { email: '', password: '', full_name: '', role: 'monitoreo' };
 
 export default function Usuarios() {
