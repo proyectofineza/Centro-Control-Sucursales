@@ -18,6 +18,60 @@ export default function Usuarios() {
   const [msg, setMsg] = useState('');
   const [busyId, setBusyId] = useState(null);
 
+  // Restablecer contraseña (solo Admin): usuario elegido, contraseña nueva,
+  // y la contraseña ya aplicada (para mostrarla/copiarla una vez).
+  const [resetUser, setResetUser] = useState(null);
+  const [newPass, setNewPass] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetDone, setResetDone] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const openReset = (u) => {
+    setResetUser(u);
+    setNewPass('');
+    setResetError('');
+    setResetDone(null);
+    setCopied(false);
+  };
+  const closeReset = () => setResetUser(null);
+
+  // Contraseña aleatoria legible (sin caracteres que se confunden: 0/O, 1/l/I).
+  const generatePassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const bytes = new Uint32Array(10);
+    crypto.getRandomValues(bytes);
+    setNewPass(Array.from(bytes, (b) => chars[b % chars.length]).join(''));
+    setResetError('');
+  };
+
+  const confirmReset = async () => {
+    if (newPass.length < 6) {
+      setResetError('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+    setResetting(true);
+    setResetError('');
+    const { data, error } = await supabase.functions.invoke('admin-set-role', {
+      body: { user_id: resetUser.id, password: newPass },
+    });
+    setResetting(false);
+    if (error || data?.error) {
+      setResetError('No se pudo restablecer la contraseña: ' + (data?.error || error.message));
+      return;
+    }
+    setResetDone(newPass);
+  };
+
+  const copyPassword = async () => {
+    try {
+      await navigator.clipboard.writeText(resetDone);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
   const load = async () => {
     setLoading(true);
     const { data } = await supabase.from('profiles').select('*').order('full_name');
@@ -146,7 +200,10 @@ export default function Usuarios() {
                 </td>
                 <td><Badge className={u.active ? 'badge-green' : 'badge-red'}>{u.active ? 'Activo' : 'Inactivo'}</Badge></td>
                 <td className="text-text3 font-mono">{fmtDateTime(u.created_at)}</td>
-                <td className="text-right">
+                <td className="text-right whitespace-nowrap">
+                  <button className="text-[11.5px] text-brand hover:underline mr-3" disabled={busyId === u.id} onClick={() => openReset(u)}>
+                    Restablecer contraseña
+                  </button>
                   {u.id !== myProfile?.id && (
                     <button className="text-[11.5px] hover:underline" disabled={busyId === u.id} onClick={() => toggleActive(u)}>
                       {u.active ? 'Desactivar' : 'Activar'}
@@ -160,6 +217,53 @@ export default function Usuarios() {
         </div>
         <div className="px-4 py-2.5 text-[11.5px] text-text3">{users.length} usuarios registrados</div>
       </div>
+
+      {resetUser && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4" onClick={resetting ? undefined : closeReset}>
+          <div className="card w-full max-w-[420px]" onClick={(e) => e.stopPropagation()}>
+            {!resetDone ? (
+              <>
+                <div className="font-bold text-[15.5px] mb-1">Restablecer contraseña</div>
+                <p className="text-[12.5px] text-text3 mb-4">
+                  Usuario: <b className="text-text">{resetUser.full_name}</b>. La contraseña actual deja de servir y se reemplaza por la nueva.
+                </p>
+                <div className="text-[10.5px] text-text3 uppercase tracking-wide mb-1">Contraseña nueva</div>
+                <div className="flex gap-2">
+                  <input
+                    className="input font-mono"
+                    type="text"
+                    value={newPass}
+                    onChange={(e) => { setNewPass(e.target.value); setResetError(''); }}
+                    placeholder="Mín. 6 caracteres"
+                    autoFocus
+                    autoComplete="off"
+                  />
+                  <button type="button" className="btn btn-ghost !px-3 whitespace-nowrap" onClick={generatePassword}>Generar</button>
+                </div>
+                {resetError && <div className="text-[12.5px] text-red mt-3">{resetError}</div>}
+                <div className="flex gap-2.5 justify-end mt-5">
+                  <button className="btn btn-ghost" onClick={closeReset} disabled={resetting}>Cancelar</button>
+                  <button className={`btn ${newPass.length >= 6 && !resetting ? 'btn-primary' : 'btn-disabled'}`} disabled={newPass.length < 6 || resetting} onClick={confirmReset}>
+                    {resetting ? 'Guardando…' : 'Restablecer'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="font-bold text-[15.5px] mb-1">Contraseña restablecida</div>
+                <p className="text-[12.5px] text-text3 mb-4">
+                  Pasale esta contraseña a <b className="text-text">{resetUser.full_name}</b>. Por seguridad no se vuelve a mostrar una vez que cerrás esta ventana.
+                </p>
+                <div className="bg-surface2 border border-border rounded-xl px-4 py-3 font-mono text-lg tracking-wide text-center select-all">{resetDone}</div>
+                <div className="flex gap-2.5 justify-end mt-5">
+                  <button className="btn btn-ghost" onClick={copyPassword}>{copied ? '¡Copiada!' : 'Copiar'}</button>
+                  <button className="btn btn-primary" onClick={closeReset}>Listo</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
