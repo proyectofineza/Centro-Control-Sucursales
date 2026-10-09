@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import Badge from '../components/Badge.jsx';
 import Kpi from '../components/Kpi.jsx';
+import TragamonedasResumen from '../components/TragamonedasResumen.jsx';
 import { IconSearch } from '../components/icons.jsx';
 import { downloadCsv, ROLE_LABEL } from '../lib/format.js';
 import {
@@ -93,6 +94,8 @@ export default function TragamonedasPanel() {
           <button className={`btn ${canNext ? 'btn-ghost' : 'btn-disabled'} !px-3 !py-2`} onClick={next} disabled={!canNext} aria-label="Siguiente">→</button>
         </div>
       </div>
+
+      <TragamonedasResumen branches={branches} configMap={configMap} />
 
       <div className="flex items-center gap-3 flex-wrap mb-4">
         <div className="flex gap-1 bg-surface border border-border rounded-[10px] p-1 w-fit">
@@ -281,8 +284,6 @@ function DayView({ date, today, branches, configMap, filters }) {
   }, [date]);
 
   const withMachines = useMemo(() => branches.filter((b) => (configMap[b.id] || 0) > 0), [branches, configMap]);
-  const unsurveyed = branches.filter((b) => configMap[b.id] === undefined).length;
-  const totalMachines = withMachines.reduce((s, b) => s + configMap[b.id], 0);
 
   const checkMap = useMemo(() => {
     const m = {};
@@ -352,7 +353,7 @@ function DayView({ date, today, branches, configMap, filters }) {
 
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
         {perSlot.map((p) => (
           <Kpi
             key={p.slot}
@@ -362,8 +363,6 @@ function DayView({ date, today, branches, configMap, filters }) {
             color={p.total && p.done === p.total ? GREEN : p.done === 0 ? RED : AMBER}
           />
         ))}
-        <Kpi label="Sucursales con tragamonedas" value={withMachines.length} sub={`${totalMachines} máquinas en total`} />
-        <Kpi label="Sin relevar" value={unsurveyed} sub="aún sin contar máquinas" />
       </div>
 
       <Filters {...filters} />
@@ -577,7 +576,6 @@ function PeriodView({ mode, from, to, closed, branches, configMap, filters }) {
     return list.sort((a, b) => b.problems - a.problems || a.r_branch_code.localeCompare(b.r_branch_code));
   }, [rows, cityFilter, q, onlyIssues, expectedPerBranch]);
 
-  const unsurveyed = branches.filter((b) => configMap[b.id] === undefined).length;
   const periodName = mode === 'mes' ? 'mes' : 'semana';
 
   const exportCsv = () => {
@@ -610,11 +608,10 @@ function PeriodView({ mode, from, to, closed, branches, configMap, filters }) {
 
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
         <Kpi label="Controles realizados" value={`${totals.done}/${expectedTotal}`} sub={`${totals.pct}% de cumplimiento`} color={expectedTotal ? pctColor(totals.pct) : undefined} />
         <Kpi label="Controles con incidencia" value={totals.withIncident} sub={totals.done ? `${Math.round((totals.withIncident / totals.done) * 100)}% de los realizados` : 'sin controles'} color={totals.withIncident > 0 ? '#ff8a3d' : undefined} />
         <Kpi label="Sucursales con incidencia" value={`${totals.branchesWithIncident}/${nBranches}`} sub={`de ${nBranches} con tragamonedas`} />
-        <Kpi label="Sin relevar" value={unsurveyed} sub="aún sin contar máquinas" />
       </div>
       <div className="grid grid-cols-3 gap-3 mb-4">
         <Kpi label="Sin sacar" value={totals.inside} sub="máquinas detectadas" color={totals.inside > 0 ? '#ff8a3d' : undefined} />

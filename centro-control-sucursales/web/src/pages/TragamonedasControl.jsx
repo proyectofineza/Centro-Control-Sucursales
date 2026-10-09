@@ -3,17 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient.js';
 import Badge from '../components/Badge.jsx';
 import Kpi from '../components/Kpi.jsx';
+import TragamonedasResumen from '../components/TragamonedasResumen.jsx';
 import { IconSearch } from '../components/icons.jsx';
 import { ROLE_LABEL } from '../lib/format.js';
 import { SLOT_TIMES, currentControlDate, suggestedSlot, isSlotInFuture, fmtControlDate } from '../lib/slots.js';
 
 // Estados posibles de una sucursal para el horario elegido.
 const ESTADO = {
-  sin_relevar: { label: 'Sin relevar', badge: 'badge-neutral' },
   pendiente: { label: 'Pendiente', badge: 'badge-red' },
   ok: { label: 'Controlada', badge: 'badge-green' },
   con_incidencia: { label: 'Con incidencia', badge: 'badge-orange' },
-  sin_tragamonedas: { label: 'Sin tragamonedas', badge: 'badge-neutral' },
 };
 
 // Lista de sucursales para controlar tragamonedas (Monitoreo y Admin).
@@ -63,15 +62,18 @@ export default function TragamonedasControl() {
 
   const rows = useMemo(
     () =>
-      branches.map((b) => {
-        const count = configMap[b.id];
-        const check = checksMap[b.id];
-        let status = 'pendiente';
-        if (count === undefined) status = 'sin_relevar';
-        else if (count === 0) status = 'sin_tragamonedas';
-        else if (check) status = check.has_incident ? 'con_incidencia' : 'ok';
-        return { branch: b, count, status };
-      }),
+      // Solo aparecen las sucursales que tienen tragamonedas cargadas en la
+      // base (cantidad mayor a 0). Si más adelante se les carga una cantidad,
+      // pasan a aparecer solas.
+      branches
+        .filter((b) => (configMap[b.id] || 0) > 0)
+        .map((b) => {
+          const count = configMap[b.id];
+          const check = checksMap[b.id];
+          let status = 'pendiente';
+          if (check) status = check.has_incident ? 'con_incidencia' : 'ok';
+          return { branch: b, count, status };
+        }),
     [branches, configMap, checksMap]
   );
 
@@ -93,7 +95,7 @@ export default function TragamonedasControl() {
     return list;
   }, [scoped, estado, search]);
 
-  const withMachines = rows.filter((r) => ['pendiente', 'ok', 'con_incidencia'].includes(r.status));
+  const withMachines = rows;
   const done = withMachines.filter((r) => r.status !== 'pendiente').length;
   const future = isSlotInFuture(controlDate, slot);
 
@@ -108,6 +110,8 @@ export default function TragamonedasControl() {
         </div>
         <div className="text-[12px] text-text3">Fecha de control: {fmtControlDate(controlDate)}</div>
       </div>
+
+      <TragamonedasResumen branches={branches} configMap={configMap} />
 
       <div className="flex gap-1 bg-surface border border-border rounded-[10px] p-1 w-fit mb-3">
         {SLOT_TIMES.map((s) => (
@@ -127,11 +131,10 @@ export default function TragamonedasControl() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
         <Kpi label={`Controladas ${slot}`} value={`${done}/${withMachines.length}`} sub="sucursales con tragamonedas" color={withMachines.length && done === withMachines.length ? '#22e2a0' : undefined} />
         <Kpi label="Pendientes" value={counts.pendiente} color="#ff5468" pulse={counts.pendiente > 0} />
         <Kpi label="Con incidencia" value={counts.con_incidencia} color="#ff8a3d" />
-        <Kpi label="Sin relevar" value={counts.sin_relevar} sub="falta contar las máquinas" />
       </div>
 
       <div className="flex items-center gap-2.5 mb-3.5 flex-wrap">
@@ -165,12 +168,12 @@ export default function TragamonedasControl() {
                   <td className="font-mono text-text2">{r.branch.code}</td>
                   <td className="font-medium">{r.branch.name}</td>
                   <td className="text-text2">{r.branch.city}</td>
-                  <td className="font-mono">{r.count === undefined ? '—' : r.count}</td>
+                  <td className="font-mono">{r.count}</td>
                   <td><Badge className={ESTADO[r.status].badge}>{ESTADO[r.status].label}</Badge></td>
                   <td className="text-text2 text-[12px]">{whoMap[checksMap[r.branch.id]?.operator_id] || '—'}</td>
                   <td className="text-right">
                     <button className="text-[12px] font-semibold text-brand hover:underline" onClick={() => open(r)}>
-                      {r.status === 'sin_relevar' ? 'Relevar →' : r.status === 'sin_tragamonedas' ? 'Editar cantidad' : r.status === 'pendiente' ? 'Controlar →' : 'Ver / editar'}
+                      {r.status === 'pendiente' ? 'Controlar →' : 'Ver / editar'}
                     </button>
                   </td>
                 </tr>
