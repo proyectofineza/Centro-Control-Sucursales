@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient.js';
 import Badge from '../components/Badge.jsx';
 import Kpi from '../components/Kpi.jsx';
 import { IconSearch } from '../components/icons.jsx';
+import { ROLE_LABEL } from '../lib/format.js';
 import { SLOT_TIMES, currentControlDate, suggestedSlot, isSlotInFuture, fmtControlDate } from '../lib/slots.js';
 
 // Estados posibles de una sucursal para el horario elegido.
@@ -23,6 +24,7 @@ export default function TragamonedasControl() {
   const [branches, setBranches] = useState([]);
   const [configMap, setConfigMap] = useState({});
   const [checksMap, setChecksMap] = useState({});
+  const [whoMap, setWhoMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [estado, setEstado] = useState('todas');
   const [cityFilter, setCityFilter] = useState('');
@@ -33,7 +35,7 @@ export default function TragamonedasControl() {
     const [{ data: br }, { data: cfg }, { data: chk }] = await Promise.all([
       supabase.from('branches').select('id, code, name, city').eq('active', true).order('code'),
       supabase.from('slot_branch_config').select('branch_id, machine_count'),
-      supabase.from('slot_checks').select('branch_id, has_incident, machine_count').eq('control_date', controlDate).eq('slot', s),
+      supabase.from('slot_checks').select('branch_id, has_incident, machine_count, operator_id').eq('control_date', controlDate).eq('slot', s),
     ]);
     setBranches(br || []);
     const cMap = {};
@@ -42,6 +44,15 @@ export default function TragamonedasControl() {
     const kMap = {};
     (chk || []).forEach((c) => (kMap[c.branch_id] = c));
     setChecksMap(kMap);
+    // Quién reportó cada control (rol + nombre). Si no se pueden leer los
+    // perfiles, simplemente no se muestra la columna con datos.
+    const ids = [...new Set((chk || []).map((c) => c.operator_id).filter(Boolean))];
+    const wMap = {};
+    if (ids.length) {
+      const { data: profs } = await supabase.from('profiles').select('id, full_name, role').in('id', ids);
+      (profs || []).forEach((p) => (wMap[p.id] = `${ROLE_LABEL[p.role] || p.role} — ${p.full_name}`));
+    }
+    setWhoMap(wMap);
     setLoading(false);
   };
 
@@ -144,11 +155,11 @@ export default function TragamonedasControl() {
         <div className="overflow-x-auto">
           <table className="datatable">
             <thead>
-              <tr><th>Código</th><th>Sucursal</th><th>Ciudad</th><th>Máquinas</th><th>Estado {slot}</th><th></th></tr>
+              <tr><th>Código</th><th>Sucursal</th><th>Ciudad</th><th>Máquinas</th><th>Estado {slot}</th><th>Reportó</th><th></th></tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={6} className="text-center text-text3 py-8">Cargando…</td></tr>}
-              {!loading && filtered.length === 0 && <tr><td colSpan={6} className="text-center text-text3 py-8">No hay sucursales para este filtro.</td></tr>}
+              {loading && <tr><td colSpan={7} className="text-center text-text3 py-8">Cargando…</td></tr>}
+              {!loading && filtered.length === 0 && <tr><td colSpan={7} className="text-center text-text3 py-8">No hay sucursales para este filtro.</td></tr>}
               {!loading && filtered.map((r) => (
                 <tr key={r.branch.id}>
                   <td className="font-mono text-text2">{r.branch.code}</td>
@@ -156,9 +167,10 @@ export default function TragamonedasControl() {
                   <td className="text-text2">{r.branch.city}</td>
                   <td className="font-mono">{r.count === undefined ? '—' : r.count}</td>
                   <td><Badge className={ESTADO[r.status].badge}>{ESTADO[r.status].label}</Badge></td>
+                  <td className="text-text2 text-[12px]">{whoMap[checksMap[r.branch.id]?.operator_id] || '—'}</td>
                   <td className="text-right">
                     <button className="text-[12px] font-semibold text-brand hover:underline" onClick={() => open(r)}>
-                      {r.status === 'sin_relevar' ? 'Relevar →' : r.status === 'sin_tragamonedas' ? 'Editar cantidad' : r.status === 'pendiente' ? 'Controlar →' : 'Ver / corregir'}
+                      {r.status === 'sin_relevar' ? 'Relevar →' : r.status === 'sin_tragamonedas' ? 'Editar cantidad' : r.status === 'pendiente' ? 'Controlar →' : 'Ver / editar'}
                     </button>
                   </td>
                 </tr>

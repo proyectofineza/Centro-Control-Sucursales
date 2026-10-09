@@ -3,9 +3,9 @@ import { supabase } from '../lib/supabaseClient.js';
 import Badge from '../components/Badge.jsx';
 import Kpi from '../components/Kpi.jsx';
 import { IconSearch } from '../components/icons.jsx';
-import { downloadCsv } from '../lib/format.js';
+import { downloadCsv, ROLE_LABEL } from '../lib/format.js';
 import {
-  SLOT_TIMES, SLOT_CHECKS, currentControlDate, addDays, fmtControlDate, issuesOf,
+  SLOT_TIMES, SLOT_CHECKS, ISSUE_BY_KEY, describeChanges, fmtDateTimePy, currentControlDate, addDays, fmtControlDate, issuesOf,
   weekRange, monthRange, addMonths, fmtMonthLabel, fmtShortDate,
   datesUpToToday, expectedChecksPerBranch, expectedDaysForSlot,
 } from '../lib/slots.js';
@@ -149,6 +149,103 @@ function Filters({ cities, cityFilter, setCityFilter, search, setSearch, onlyIss
 
 const matchesText = (q, ...parts) => !q || parts.join(' ').toLowerCase().includes(q);
 
+const reporterOf = (name, role) => (name ? `${role ? `${ROLE_LABEL[role] || role} — ` : ''}${name}` : '—');
+
+// ---------------------------------------------------------------------
+// Problemas sin resolver: máquinas cuyo ÚLTIMO control las dejó marcadas.
+// Se resuelven solas cuando un control posterior las marca OK.
+// ---------------------------------------------------------------------
+function OpenIssuesCard({ filters }) {
+  const { cityFilter, search } = filters;
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const { data, error: err } = await supabase.from('slot_open_issues').select('*').order('since_date').order('branch_code').limit(1000);
+      if (!alive) return;
+      if (err) setError(err.message);
+      setRows(data || []);
+      setLoading(false);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const todayIso = currentControlDate();
+  const daysOpen = (r) => Math.max(1, Math.round((new Date(`${todayIso}T12:00:00Z`) - new Date(`${r.since_date}T12:00:00Z`)) / 86400000) + 1);
+  const q = search.trim().toLowerCase();
+  const list = useMemo(() => {
+    let l = rows;
+    if (cityFilter) l = l.filter((r) => r.branch_city === cityFilter);
+    if (q) l = l.filter((r) => matchesText(q, r.branch_code, r.branch_name, r.branch_city));
+    return l;
+  }, [rows, cityFilter, q]);
+
+  const exportCsv = () => {
+    downloadCsv(
+      `tragamonedas_problemas_sin_resolver_${todayIso}.csv`,
+      list.map((r) => ({
+        codigo: r.branch_code,
+        sucursal: r.branch_name,
+        ciudad: r.branch_city,
+        tragamonedas: r.machine_no,
+        problema: ISSUE_BY_KEY[r.issue_key]?.issue || r.issue_key,
+        desde: `${r.since_date} ${r.since_slot}`,
+        dias_abierto: daysOpen(r),
+        ultimo_control: `${r.last_date} ${r.last_slot}`,
+      }))
+    );
+  };
+
+  return (
+    <div className="card !p-0 overflow-hidden mb-4">
+      <div className="px-4 pt-3.5 pb-1 flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-sm font-semibold">Problemas sin resolver ({loading ? '…' : list.length})</div>
+        <button className="btn btn-ghost !text-[12px] !py-1.5" onClick={exportCsv} disabled={list.length === 0}>Exportar CSV</button>
+      </div>
+      <div className="px-4 pb-2 text-[11.5px] text-text3">
+        Máquinas cuyo último control las dejó con problema. Se resuelven solas cuando un control posterior las marca OK.
+      </div>
+      {error ? (
+        <div className="px-4 pb-4 text-sm text-text2">
+          No se pudo cargar: {error}
+          <div className="text-[12px] text-text3 mt-1">Si recién se actualizó el sistema, falta correr la migración 0010 en Supabase.</div>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="datatable">
+            <thead>
+              <tr><th>Sucursal</th><th>Máquina</th><th>Problema</th><th>Desde</th><th>Días abierto</th><th>Último control</th></tr>
+            </thead>
+            <tbody>
+              {loading && <tr><td colSpan={6} className="text-center text-text3 py-6">Cargando…</td></tr>}
+              {!loading && list.length === 0 && <tr><td colSpan={6} className="text-center text-text3 py-6">No hay problemas pendientes. ✔</td></tr>}
+              {list.map((r) => {
+                const meta = ISSUE_BY_KEY[r.issue_key];
+                const d = daysOpen(r);
+                return (
+                  <tr key={`${r.branch_id}-${r.machine_no}-${r.issue_key}`}>
+                    <td><span className="font-mono text-text3 mr-1.5">{r.branch_code}</span>{r.branch_name}<div className="text-[11px] text-text3">{r.branch_city}</div></td>
+                    <td className="font-mono">#{r.machine_no}</td>
+                    <td><Badge className={r.issue_key === 'not_operating' ? 'badge-red' : 'badge-orange'}>{meta?.issue || r.issue_key}</Badge></td>
+                    <td className="font-mono text-text2">{fmtControlDate(r.since_date)} {r.since_slot}</td>
+                    <td className="font-mono font-semibold" style={{ color: d >= 3 ? RED : d >= 2 ? AMBER : undefined }}>{d} {d === 1 ? 'día' : 'días'}</td>
+                    <td className="font-mono text-text2">{fmtControlDate(r.last_date)} {r.last_slot}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------
 // Vista DIARIA
 // ---------------------------------------------------------------------
@@ -157,6 +254,7 @@ function DayView({ date, today, branches, configMap, filters }) {
   const [checks, setChecks] = useState([]);
   const [issues, setIssues] = useState([]);
   const [trend, setTrend] = useState([]);
+  const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -164,12 +262,14 @@ function DayView({ date, today, branches, configMap, filters }) {
     (async () => {
       setLoading(true);
       const from = addDays(date, -6);
-      const [{ data: chk }, { data: iss }, { data: week }] = await Promise.all([
+      const [{ data: chk }, { data: iss }, { data: week }, { data: hist }] = await Promise.all([
         supabase.from('slot_checks').select('branch_id, slot, has_incident, machine_count').eq('control_date', date),
         supabase.from('slot_items_detailed').select('*').eq('control_date', date).eq('has_issue', true).order('slot').order('branch_code'),
         supabase.from('slot_daily_summary').select('*').gte('control_date', from).lte('control_date', date),
+        supabase.from('slot_history_detailed').select('*').eq('control_date', date).order('edited_at', { ascending: false }),
       ]);
       if (!alive) return;
+      setHistory(hist || []);
       setChecks(chk || []);
       setIssues(iss || []);
       setTrend(week || []);
@@ -216,6 +316,13 @@ function DayView({ date, today, branches, configMap, filters }) {
     return list;
   }, [issues, cityFilter, q]);
 
+  const historyRows = useMemo(() => {
+    let list = history;
+    if (cityFilter) list = list.filter((h) => h.branch_city === cityFilter);
+    if (q) list = list.filter((h) => matchesText(q, h.branch_code, h.branch_name, h.branch_city));
+    return list;
+  }, [history, cityFilter, q]);
+
   const trendDays = useMemo(() => {
     const expected = withMachines.length * SLOT_TIMES.length;
     return Array.from({ length: 7 }, (_, i) => {
@@ -238,7 +345,7 @@ function DayView({ date, today, branches, configMap, filters }) {
         tragamonedas: i.machine_no,
         problemas: issuesOf(i).join(' / '),
         observacion: i.observation || '',
-        operador: i.operator_name || '',
+        reporto: reporterOf(i.operator_name, i.operator_role),
       }))
     );
   };
@@ -260,6 +367,8 @@ function DayView({ date, today, branches, configMap, filters }) {
       </div>
 
       <Filters {...filters} />
+
+      <OpenIssuesCard filters={filters} />
 
       <div className="card !p-0 overflow-hidden mb-4">
         <div className="px-4 pt-3.5 pb-2 text-sm font-semibold">Estado por sucursal — {fmtControlDate(date)}</div>
@@ -301,7 +410,7 @@ function DayView({ date, today, branches, configMap, filters }) {
         <div className="overflow-x-auto">
           <table className="datatable">
             <thead>
-              <tr><th>Horario</th><th>Sucursal</th><th>Máquina</th><th>Problema</th><th>Observación</th><th>Operador</th></tr>
+              <tr><th>Horario</th><th>Sucursal</th><th>Máquina</th><th>Problema</th><th>Observación</th><th>Reportó</th></tr>
             </thead>
             <tbody>
               {!loading && issueRows.length === 0 && <tr><td colSpan={6} className="text-center text-text3 py-8">Sin incidencias de tragamonedas en esta fecha.</td></tr>}
@@ -318,12 +427,43 @@ function DayView({ date, today, branches, configMap, filters }) {
                     </div>
                   </td>
                   <td className="text-text2 max-w-[240px]">{i.observation || '—'}</td>
-                  <td className="text-text2">{i.operator_name || '—'}</td>
+                  <td className="text-text2">{reporterOf(i.operator_name, i.operator_role)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="card !p-0 overflow-hidden mb-4">
+        <div className="px-4 pt-3.5 pb-1 text-sm font-semibold">Historial de ediciones del día ({historyRows.length})</div>
+        <div className="px-4 pb-2 text-[11.5px] text-text3">
+          Cada vez que alguien modifica un informe ya guardado queda registrado acá: quién, cuándo y qué cambió.
+        </div>
+        {historyRows.length === 0 ? (
+          <div className="px-4 pb-5 text-sm text-text3">No hubo ediciones de informes en esta fecha.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="datatable">
+              <thead>
+                <tr><th>Cuándo</th><th>Sucursal</th><th>Horario</th><th>Editó</th><th>Qué cambió</th></tr>
+              </thead>
+              <tbody>
+                {historyRows.map((h) => (
+                  <tr key={h.id}>
+                    <td className="font-mono text-text2 whitespace-nowrap">{fmtDateTimePy(h.edited_at)}</td>
+                    <td><span className="font-mono text-text3 mr-1.5">{h.branch_code}</span>{h.branch_name}</td>
+                    <td className="font-mono">{h.slot}</td>
+                    <td className="text-text2">{reporterOf(h.editor_name, h.editor_role)}</td>
+                    <td className="text-text2 max-w-[360px]">
+                      {describeChanges(h).map((t, k) => <div key={k} className="text-[12px] leading-snug">• {t}</div>)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -452,9 +592,9 @@ function PeriodView({ mode, from, to, closed, branches, configMap, filters }) {
         controles_esperados: expectedPerBranch,
         cumplimiento_pct: r.pct,
         controles_con_incidencia: r.r_checks_with_incident,
-        adentro_del_local: r.r_issues_inside,
+        sin_sacar: r.r_issues_inside,
         cerca_del_atc: r.r_issues_near_atc,
-        no_opera: r.r_issues_not_operating,
+        apagado: r.r_issues_not_operating,
       }))
     );
   };
@@ -477,9 +617,9 @@ function PeriodView({ mode, from, to, closed, branches, configMap, filters }) {
         <Kpi label="Sin relevar" value={unsurveyed} sub="aún sin contar máquinas" />
       </div>
       <div className="grid grid-cols-3 gap-3 mb-4">
-        <Kpi label="Adentro del local" value={totals.inside} sub="máquinas detectadas" color={totals.inside > 0 ? '#ff8a3d' : undefined} />
+        <Kpi label="Sin sacar" value={totals.inside} sub="máquinas detectadas" color={totals.inside > 0 ? '#ff8a3d' : undefined} />
         <Kpi label="Cerca del ATC" value={totals.nearAtc} sub="máquinas detectadas" color={totals.nearAtc > 0 ? '#ff8a3d' : undefined} />
-        <Kpi label="No opera" value={totals.notOp} sub="máquinas detectadas" color={totals.notOp > 0 ? RED : undefined} />
+        <Kpi label="Apagado" value={totals.notOp} sub="máquinas detectadas" color={totals.notOp > 0 ? RED : undefined} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
@@ -537,6 +677,8 @@ function PeriodView({ mode, from, to, closed, branches, configMap, filters }) {
 
       <Filters {...filters} />
 
+      <OpenIssuesCard filters={filters} />
+
       <div className="card !p-0 overflow-hidden">
         <div className="px-4 pt-3.5 pb-2 flex items-center justify-between gap-2 flex-wrap">
           <div className="text-sm font-semibold">Detalle por sucursal — {mode === 'mes' ? 'mes' : 'semana'}</div>
@@ -546,7 +688,7 @@ function PeriodView({ mode, from, to, closed, branches, configMap, filters }) {
           <table className="datatable">
             <thead>
               <tr>
-                <th>Código</th><th>Sucursal</th><th>Ciudad</th><th>Máq.</th><th>Controles</th><th>Cumpl.</th><th>Con incidencia</th><th>Adentro</th><th>Cerca ATC</th><th>No opera</th>
+                <th>Código</th><th>Sucursal</th><th>Ciudad</th><th>Máq.</th><th>Controles</th><th>Cumpl.</th><th>Con incidencia</th><th>Sin sacar</th><th>Cerca ATC</th><th>Apagado</th>
               </tr>
             </thead>
             <tbody>
