@@ -5,12 +5,49 @@
 export const SLOT_TIMES = ['18:00', '22:00', '23:30'];
 
 // Los tres puntos que se verifican en cada tragamonedas.
-// "ok" = cómo debe estar; "bad" = cómo se registra la incidencia.
+// "ok" = cómo debe estar; "bad" = cómo se registra el problema.
+// Los TRES problemas (Sin sacar, Cerca del ATC y Apagado) cuentan como
+// incidencia: la máquina queda marcada y se arrastra como "sin resolver"
+// hasta que un control posterior la marque OK.
+// `issueKey` es el nombre que usa la base de datos (vista slot_open_issues).
 export const SLOT_CHECKS = [
-  { key: 'is_outside', label: 'Afuera del local', ok: 'Está afuera', bad: 'Está adentro', issue: 'Adentro del local' },
-  { key: 'far_from_atc', label: 'Alejada del ATC', ok: 'Alejada', bad: 'Cerca del ATC', issue: 'Cerca del ATC' },
-  { key: 'is_operating', label: 'En funcionamiento', ok: 'Funciona', bad: 'No opera', issue: 'No opera' },
+  { key: 'is_outside', issueKey: 'inside', label: 'Afuera del local', ok: 'Afuera', bad: 'Sin sacar', issue: 'Sin sacar' },
+  { key: 'far_from_atc', issueKey: 'near_atc', label: 'Alejada del ATC', ok: 'Alejada', bad: 'Cerca del ATC', issue: 'Cerca del ATC' },
+  { key: 'is_operating', issueKey: 'not_operating', label: 'En funcionamiento', ok: 'Funcionando', bad: 'Apagado', issue: 'Apagado' },
 ];
+
+export const ISSUE_BY_KEY = Object.fromEntries(SLOT_CHECKS.map((c) => [c.issueKey, c]));
+
+// Tiempo (segundos) que tiene quien reporta para editar el informe. Lo
+// aplica la base de datos; este valor es solo informativo para la pantalla.
+export const EDIT_WINDOW_SECONDS = 60;
+
+// Resumen legible de los cambios de una edición (para el historial).
+export function describeChanges(h) {
+  const out = [];
+  if (h.before_count !== h.after_count) out.push(`Cantidad de tragamonedas: ${h.before_count} → ${h.after_count}`);
+  const before = Object.fromEntries((h.before_items || []).map((x) => [x.machine_no, x]));
+  const after = Object.fromEntries((h.after_items || []).map((x) => [x.machine_no, x]));
+  const nums = [...new Set([...Object.keys(before), ...Object.keys(after)])].map(Number).sort((a, b) => a - b);
+  nums.forEach((n) => {
+    const b = before[n];
+    const a = after[n];
+    if (!b) return out.push(`#${n}: máquina agregada`);
+    if (!a) return out.push(`#${n}: máquina quitada`);
+    SLOT_CHECKS.forEach((c) => {
+      if (b[c.key] !== a[c.key]) out.push(`#${n}: ${c.issue} ${b[c.key] ? 'no estaba marcado → ahora SÍ (problema)' : 'estaba marcado → ahora OK'}`);
+    });
+    if ((b.observation || '') !== (a.observation || '')) out.push(`#${n}: observación modificada`);
+  });
+  if ((h.before_notes || '') !== (h.after_notes || '')) out.push('Observación general modificada');
+  return out.length ? out : ['Sin diferencias visibles'];
+}
+
+// Fecha y hora corta en hora de Paraguay, ej. "06/10 18:02"
+export function fmtDateTimePy(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('es-PY', { timeZone: 'America/Asuncion', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
 
 const TZ = 'America/Asuncion';
 
@@ -78,7 +115,7 @@ export function fmtControlDate(isoDate) {
   return `${d}/${m}/${y}`;
 }
 
-// Lista de problemas de una máquina, en texto: ["No opera", "Cerca del ATC"]
+// Lista de problemas de una máquina, en texto: ["Apagado", "Cerca del ATC"]
 export function issuesOf(item) {
   return SLOT_CHECKS.filter((c) => item[c.key] === false).map((c) => c.issue);
 }
