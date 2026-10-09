@@ -2,7 +2,7 @@
 
 // Horarios de control (hora Paraguay). Si algún día cambian, alcanza con
 // editar esta lista — el resto de la app y la base de datos la toman de acá.
-export const SLOT_TIMES = ['18:00', '22:00', '23:30'];
+export const SLOT_TIMES = ['15:30', '18:00', '22:00', '23:30'];
 
 // Los tres puntos que se verifican en cada tragamonedas.
 // "ok" = cómo debe estar; "bad" = cómo se registra el problema.
