@@ -16,6 +16,11 @@ export const SLOT_CHECKS = [
   { key: 'is_operating', issueKey: 'not_operating', label: 'En funcionamiento', ok: 'Funcionando', bad: 'Apagado', issue: 'Apagado' },
 ];
 
+// Penalidades: cuántos DÍAS en el mes puede tener una sucursal cada problema
+// antes de entrar en penalidad. Para cambiar un límite, editar el número.
+// (Un día cuenta una sola vez aunque el problema aparezca en varios controles.)
+export const PENALTY_LIMITS = { inside: 3, near_atc: 3, not_operating: 3 };
+
 export const ISSUE_BY_KEY = Object.fromEntries(SLOT_CHECKS.map((c) => [c.issueKey, c]));
 
 // Tiempo (segundos) que tiene quien reporta para editar el informe. Lo

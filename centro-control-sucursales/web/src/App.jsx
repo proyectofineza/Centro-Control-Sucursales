@@ -20,6 +20,7 @@ import Configuracion from './pages/Configuracion.jsx';
 import TragamonedasControl from './pages/TragamonedasControl.jsx';
 import TragamonedasCheck from './pages/TragamonedasCheck.jsx';
 import TragamonedasPanel from './pages/TragamonedasPanel.jsx';
+import TragamonedasPenalidades from './pages/TragamonedasPenalidades.jsx';
 
 const ALL = ['admin', 'supervisor', 'monitoreo', 'rrhh', 'tragamonedas'];
 
@@ -47,7 +48,8 @@ export default function App() {
         <Route path="/reportes" element={<ProtectedRoute roles={['admin', 'supervisor']}><Reportes /></ProtectedRoute>} />
         <Route path="/tragamonedas" element={<ProtectedRoute roles={['admin', 'monitoreo']}><TragamonedasControl /></ProtectedRoute>} />
         <Route path="/tragamonedas/control/:branchId" element={<ProtectedRoute roles={['admin', 'monitoreo']}><TragamonedasCheck /></ProtectedRoute>} />
-        <Route path="/tragamonedas/panel" element={<ProtectedRoute roles={['admin', 'tragamonedas']}><TragamonedasPanel /></ProtectedRoute>} />
+        <Route path="/tragamonedas/panel" element={<ProtectedRoute roles={['admin', 'supervisor', 'tragamonedas']}><TragamonedasPanel /></ProtectedRoute>} />
+        <Route path="/tragamonedas/penalidades" element={<ProtectedRoute roles={['admin', 'supervisor', 'tragamonedas']}><TragamonedasPenalidades /></ProtectedRoute>} />
         <Route path="/usuarios" element={<ProtectedRoute roles={['admin']}><Usuarios /></ProtectedRoute>} />
         <Route path="/auditoria" element={<ProtectedRoute roles={['admin']}><Auditoria /></ProtectedRoute>} />
         <Route path="/configuracion" element={<ProtectedRoute roles={['admin']}><Configuracion /></ProtectedRoute>} />
