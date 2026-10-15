@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from '../lib/auth.jsx';
 import { supabase } from '../lib/supabaseClient.js';
 import Badge from '../components/Badge.jsx';
 import Kpi from '../components/Kpi.jsx';
@@ -18,6 +19,7 @@ const ESTADO = {
 // Lista de sucursales para controlar tragamonedas (Monitoreo y Admin).
 export default function TragamonedasControl() {
   const navigate = useNavigate();
+  const { role } = useAuth();
   const controlDate = useMemo(() => currentControlDate(), []);
   const [slot, setSlot] = useState(suggestedSlot());
   const [branches, setBranches] = useState([]);
@@ -95,6 +97,9 @@ export default function TragamonedasControl() {
     return list;
   }, [scoped, estado, search]);
 
+  // Sucursales activas que todavía no tienen cantidad cargada (p. ej. recién creadas).
+  const sinCantidad = useMemo(() => branches.filter((b) => configMap[b.id] === undefined).length, [branches, configMap]);
+
   const withMachines = rows;
   const done = withMachines.filter((r) => r.status !== 'pendiente').length;
   const future = isSlotInFuture(controlDate, slot);
@@ -110,6 +115,15 @@ export default function TragamonedasControl() {
         </div>
         <div className="text-[12px] text-text3">Fecha de control: {fmtControlDate(controlDate)}</div>
       </div>
+
+      {role === 'admin' && !loading && sinCantidad > 0 && (
+        <div className="card !py-2.5 mb-3 text-[12.5px] text-text2 border-amber/40 flex items-center justify-between gap-3 flex-wrap">
+          <span>
+            <b className="text-amber">{sinCantidad} sucursal{sinCantidad > 1 ? 'es' : ''}</b> sin cantidad de tragamonedas cargada (no aparecen en esta lista).
+          </span>
+          <Link to="/tragamonedas/reglas" className="text-brand font-semibold hover:underline">Cargar cantidades →</Link>
+        </div>
+      )}
 
       <TragamonedasResumen branches={branches} configMap={configMap} />
 

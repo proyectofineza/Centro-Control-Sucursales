@@ -7,7 +7,7 @@ import { IconCheck, IconAlert } from '../components/icons.jsx';
 import { ROLE_LABEL } from '../lib/format.js';
 import {
   slotTimesFor, SLOT_CHECKS, ISSUE_BY_KEY, EDIT_WINDOW_SECONDS,
-  currentControlDate, fmtControlDate, fmtShortDate, fmtDateTimePy, describeChanges, issuesEff, isRainExcused, EXCUSE_LABEL,
+  currentControlDate, fmtControlDate, fmtShortDate, fmtDateTimePy, describeChanges, issuesEff, isRainExcused, EXCUSE_LABEL, RULE_LABEL,
 } from '../lib/slots.js';
 
 const MAX_MACHINES = 50;
@@ -38,7 +38,7 @@ export default function TragamonedasCheck() {
   const [canEdit, setCanEdit] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [rain, setRain] = useState(false);
-  const [atcOk, setAtcOk] = useState(false);
+  const [rules, setRules] = useState({}); // machine_no -> 'adentro' | 'atc'
   const [savedItems, setSavedItems] = useState([]); // tal como quedó guardado (para la vista cerrada)
   const [history, setHistory] = useState([]);
   const [openIssues, setOpenIssues] = useState([]);
@@ -61,12 +61,14 @@ export default function TragamonedasCheck() {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const [{ data: b }, { data: cfg }, { data: chk }, { data: open }] = await Promise.all([
+    const [{ data: b }, { data: cfg }, { data: chk }, { data: open }, { data: rls }] = await Promise.all([
       supabase.from('branches').select('id, code, name, city').eq('id', branchId).single(),
-      supabase.from('slot_branch_config').select('machine_count, atc_ok').eq('branch_id', branchId).maybeSingle(),
+      supabase.from('slot_branch_config').select('machine_count').eq('branch_id', branchId).maybeSingle(),
       supabase.from('slot_checks').select('id, operator_id, notes, created_at, rain').eq('branch_id', branchId).eq('control_date', controlDate).eq('slot', slot).maybeSingle(),
       supabase.from('slot_open_issues').select('*').eq('branch_id', branchId),
+      supabase.from('slot_machine_rules').select('machine_no, position').eq('branch_id', branchId),
     ]);
+    setRules(Object.fromEntries((rls || []).map((r) => [r.machine_no, r.position])));
     setBranch(b || null);
     setOpenIssues(open || []);
 
@@ -90,7 +92,6 @@ export default function TragamonedasCheck() {
       setRain(false);
     }
     setSavedItems(prevItems);
-    setAtcOk(!!cfg?.atc_ok);
     setExisting(ex);
     setCanEdit(!!status.can_edit);
     setIsAdmin(!!status.is_admin);
@@ -175,8 +176,10 @@ export default function TragamonedasCheck() {
 
   const setItem = (idx, patch) => setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
 
-  const ctx = useMemo(() => ({ rain, atcOk }), [rain, atcOk]);
-  const problems = useMemo(() => items.filter((it) => issuesEff(it, ctx).length > 0), [items, ctx]);
+  const isFixed = useCallback((it) => !!rules[it.machine_no], [rules]);
+  const effIssues = useCallback((it) => issuesEff(it, { rain, fixed: isFixed(it) }), [rain, isFixed]);
+  const problems = useMemo(() => items.filter((it) => effIssues(it).length > 0), [items, effIssues]);
+  const allFixed = items.length > 0 && items.every(isFixed);
 
   // Problemas de controles ANTERIORES que siguen sin resolver, por máquina.
   const priorByMachine = useMemo(() => {
@@ -196,9 +199,9 @@ export default function TragamonedasCheck() {
     setError('');
     const payload = items.map((it) => ({
       machine_no: it.machine_no,
-      // En sucursales con regla ATC esas dos preguntas no se hacen: van como correctas.
-      is_outside: atcOk ? true : it.is_outside,
-      far_from_atc: atcOk ? true : it.far_from_atc,
+      // En máquinas con regla (siempre adentro / junto al ATC) esas dos preguntas no se hacen: van como correctas.
+      is_outside: isFixed(it) ? true : it.is_outside,
+      far_from_atc: isFixed(it) ? true : it.far_from_atc,
       is_operating: it.is_operating,
       observation: it.observation || null,
     }));
@@ -334,14 +337,17 @@ export default function TragamonedasCheck() {
             <button className="text-brand font-semibold hover:underline" onClick={() => setPhase('count')}>Cambiar cantidad</button>
           </div>
           <div className="text-[11.5px] text-text3 mb-3">
-            {atcOk ? (
-              <>Esta sucursal tiene el tragamonedas junto al ATC para funcionar: <b className="text-orange">solo “Apagado” cuenta como problema</b>.</>
+            {allFixed ? (
+              <>En esta sucursal los tragamonedas van adentro / junto al ATC para funcionar: <b className="text-orange">solo “Apagado” cuenta como problema</b>.</>
             ) : (
-              <><b className="text-orange">Sin sacar</b>, <b className="text-orange">Cerca del ATC</b> y <b className="text-orange">Apagado</b> cuentan como problema y quedan registrados como incidencia.</>
+              <>
+                <b className="text-orange">Sin sacar</b>, <b className="text-orange">Cerca del ATC</b> y <b className="text-orange">Apagado</b> cuentan como problema y quedan registrados como incidencia.
+                {items.some(isFixed) && <> Las máquinas marcadas con regla (siempre adentro / junto al ATC) solo se controlan por <b className="text-orange">Apagado</b>.</>}
+              </>
             )}
           </div>
 
-          {!atcOk && (
+          {!allFixed && (
             <div
               onClick={() => setRain((v) => !v)}
               className={`card !p-3.5 mb-3 flex items-center justify-between gap-3 cursor-pointer ${rain ? 'border-brand/60' : ''}`}
@@ -367,13 +373,17 @@ export default function TragamonedasCheck() {
 
           <div className="flex flex-col gap-3 mb-4">
             {items.map((it, idx) => {
-              const issues = issuesEff(it, ctx);
-              const excused = isRainExcused(it, rain, atcOk);
-              const prior = (priorByMachine[it.machine_no] || []).filter((o) => !atcOk || o.issue_key === 'not_operating');
+              const fixed = isFixed(it);
+              const issues = effIssues(it);
+              const excused = isRainExcused(it, rain, fixed);
+              const prior = (priorByMachine[it.machine_no] || []).filter((o) => !fixed || o.issue_key === 'not_operating');
               return (
                 <div key={it.machine_no} className={`card !p-4 ${issues.length ? 'border-orange/50' : ''}`}>
                   <div className="flex items-center justify-between mb-3">
-                    <div className="font-semibold text-sm">Tragamonedas #{it.machine_no}</div>
+                    <div className="font-semibold text-sm">
+                      Tragamonedas #{it.machine_no}
+                      {fixed && <span className="ml-2 text-[11px] font-medium text-text3">· {RULE_LABEL[rules[it.machine_no]]}: solo se controla si funciona</span>}
+                    </div>
                     {issues.length > 0 ? <Badge className="badge-orange">{issues.length} problema{issues.length > 1 ? 's' : ''}</Badge> : excused ? <Badge className="badge-neutral">Sin sacar por lluvia</Badge> : <Badge className="badge-green">Todo en orden</Badge>}
                   </div>
 
@@ -397,7 +407,7 @@ export default function TragamonedasCheck() {
                   )}
 
                   <div className="flex flex-col gap-2.5">
-                    {SLOT_CHECKS.filter((c) => !atcOk || c.key === 'is_operating').map((c) => (
+                    {SLOT_CHECKS.filter((c) => !fixed || c.key === 'is_operating').map((c) => (
                       <div key={c.key} className="flex items-center justify-between gap-3 flex-wrap">
                         <span className="text-[12.8px] text-text2">{c.label}</span>
                         <div className="flex gap-1.5">
@@ -457,7 +467,7 @@ export default function TragamonedasCheck() {
               <div className="font-bold text-[15.5px] mb-2">Confirmar control de las {slot}</div>
               {problems.length === 0 ? (
                 <p className="text-[13px] text-text2 leading-relaxed mb-5">
-                  ¿Confirmás que los {items.length} tragamonedas de <b className="text-text">{branch.code} — {branch.name}</b> están {atcOk ? 'funcionando' : rain && items.some((i) => i.is_outside === false) ? 'funcionando (algunos sin sacar por la lluvia)' : 'afuera, alejados del ATC y funcionando'}?
+                  ¿Confirmás que los {items.length} tragamonedas de <b className="text-text">{branch.code} — {branch.name}</b> están {allFixed ? 'funcionando' : items.some(isFixed) ? 'en orden (las que van adentro / junto al ATC, funcionando; las demás afuera, alejadas del ATC y funcionando)' : rain && items.some((i) => i.is_outside === false) ? 'funcionando (algunos sin sacar por la lluvia)' : 'afuera, alejados del ATC y funcionando'}?
                 </p>
               ) : (
                 <div className="mb-5">
@@ -465,7 +475,7 @@ export default function TragamonedasCheck() {
                   <div className="flex flex-col gap-1.5">
                     {problems.map((p) => (
                       <div key={p.machine_no} className="text-[12.5px] bg-surface2 border border-border rounded-lg px-3 py-2">
-                        <b>#{p.machine_no}</b> — {issuesEff(p, ctx).map((c) => c.issue).join(', ')}
+                        <b>#{p.machine_no}</b> — {effIssues(p).map((c) => c.issue).join(', ')}
                       </div>
                     ))}
                   </div>
@@ -495,7 +505,10 @@ export default function TragamonedasCheck() {
               return (
                 <div key={it.machine_no} className={`card !p-4 ${issues.length ? 'border-orange/50' : ''}`}>
                   <div className="flex items-center justify-between">
-                    <div className="font-semibold text-sm">Tragamonedas #{it.machine_no}</div>
+                    <div className="font-semibold text-sm">
+                      Tragamonedas #{it.machine_no}
+                      {fixed && <span className="ml-2 text-[11px] font-medium text-text3">· {RULE_LABEL[rules[it.machine_no]]}: solo se controla si funciona</span>}
+                    </div>
                     {issues.length > 0 ? (
                       <div className="flex gap-1 flex-wrap justify-end">{issues.map((x) => <Badge key={x} className={x === 'Apagado' ? 'badge-red' : 'badge-orange'}>{x}</Badge>)}</div>
                     ) : excuse ? <Badge className="badge-neutral">{EXCUSE_LABEL[it.inside_excuse || it.atc_excuse]}</Badge> : <Badge className="badge-green">Todo en orden</Badge>}

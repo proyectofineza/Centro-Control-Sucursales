@@ -64,21 +64,29 @@ export const PENALTY_LIMITS = { inside: 3, near_atc: 3, not_operating: 3 };
 
 // Problemas de una máquina según el contexto del control:
 //  - rain:  llueve → "Sin sacar" queda justificado si la máquina está encendida.
-//  - atcOk: sucursal con el tragamonedas junto al ATC por diseño → solo cuenta "Apagado".
+//  - fixed: la máquina tiene regla ("siempre adentro" / "junto al ATC") → solo cuenta "Apagado".
 // Devuelve las entradas de SLOT_CHECKS que cuentan como problema.
-export function issuesEff(item, { rain = false, atcOk = false } = {}) {
+export function issuesEff(item, { rain = false, fixed = false } = {}) {
   const on = item.is_operating !== false;
   return SLOT_CHECKS.filter((c) => {
     if (c.key === 'is_operating') return !on;
-    if (atcOk) return false;
+    if (fixed) return false;
     if (c.key === 'is_outside') return item.is_outside === false && !(rain && on);
     return item.far_from_atc === false;
   });
 }
 
 // ¿Este "Sin sacar" quedó justificado por la lluvia?
-export const isRainExcused = (item, rain, atcOk = false) =>
-  !!rain && !atcOk && item.is_outside === false && item.is_operating !== false;
+export const isRainExcused = (item, rain, fixed = false) =>
+  !!rain && !fixed && item.is_outside === false && item.is_operating !== false;
+
+// Reglas por máquina (se guardan solo 'adentro' y 'atc'; sin regla = 'afuera').
+export const MACHINE_RULES = [
+  { value: 'afuera', label: 'Afuera (normal)' },
+  { value: 'adentro', label: 'Siempre adentro' },
+  { value: 'atc', label: 'Junto al ATC' },
+];
+export const RULE_LABEL = { adentro: 'Siempre adentro', atc: 'Junto al ATC' };
 
 export const EXCUSE_LABEL = { lluvia: 'Justificado por lluvia', regla_sucursal: 'Permitido en esta sucursal' };
 

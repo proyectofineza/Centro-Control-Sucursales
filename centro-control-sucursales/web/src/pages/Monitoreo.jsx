@@ -145,16 +145,33 @@ export default function Monitoreo() {
       navigate(`/monitoreo/${branchId}`);
       return;
     }
-    const { data, error } = await supabase
-      .from('branch_checks')
-      .insert({ branch_id: branchId, operator_id: profile.id })
-      .select()
-      .single();
-    if (error) {
-      alert('No se pudo iniciar la verificación: ' + error.message);
+    // Se inicia desde la base: cierra solas las verificaciones viejas que
+    // quedaron abiertas y retoma la tuya si sigue abierta.
+    let checkId = null;
+    const rpc = await supabase.rpc('start_branch_check', { p_branch_id: branchId });
+    if (!rpc.error) {
+      checkId = rpc.data?.check_id || null;
+    } else if (/start_branch_check|schema cache|does not exist/i.test(rpc.error.message)) {
+      // Falta correr la migración 0014: se usa el método anterior.
+      const { data, error } = await supabase
+        .from('branch_checks')
+        .insert({ branch_id: branchId, operator_id: profile.id })
+        .select()
+        .single();
+      if (error) {
+        alert(
+          /one_open_check_per_branch/.test(error.message)
+            ? 'Esta sucursal tiene una verificación vieja que quedó abierta. Hay que correr la migración 0014 en Supabase para cerrarla.'
+            : 'No se pudo iniciar la verificación: ' + error.message
+        );
+        return;
+      }
+      checkId = data.id;
+    } else {
+      alert('No se pudo iniciar la verificación: ' + rpc.error.message);
       return;
     }
-    navigate(`/monitoreo/${branchId}`, { state: { checkId: data.id } });
+    navigate(`/monitoreo/${branchId}`, { state: { checkId } });
   };
 
   const verifiedToday = rows.filter((r) => ['verificada', 'con_incidencia'].includes(r.status)).length;
