@@ -6,8 +6,8 @@ import Badge from '../components/Badge.jsx';
 import { IconCheck, IconAlert } from '../components/icons.jsx';
 import { ROLE_LABEL } from '../lib/format.js';
 import {
-  SLOT_TIMES, SLOT_CHECKS, ISSUE_BY_KEY, EDIT_WINDOW_SECONDS,
-  currentControlDate, fmtControlDate, fmtShortDate, fmtDateTimePy, issuesOf, describeChanges,
+  slotTimesFor, SLOT_CHECKS, ISSUE_BY_KEY, EDIT_WINDOW_SECONDS,
+  currentControlDate, fmtControlDate, fmtShortDate, fmtDateTimePy, describeChanges, issuesEff, isRainExcused, EXCUSE_LABEL,
 } from '../lib/slots.js';
 
 const MAX_MACHINES = 50;
@@ -23,8 +23,9 @@ export default function TragamonedasCheck() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { profile, role } = useAuth();
-  const slot = SLOT_TIMES.includes(params.get('slot')) ? params.get('slot') : SLOT_TIMES[0];
   const controlDate = params.get('date') || currentControlDate();
+  const dayTimes = slotTimesFor(controlDate);
+  const slot = dayTimes.includes(params.get('slot')) ? params.get('slot') : dayTimes[0];
 
   const [branch, setBranch] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -36,6 +37,9 @@ export default function TragamonedasCheck() {
   const [existing, setExisting] = useState(null); // { id, createdAt, operatorName, operatorRole }
   const [canEdit, setCanEdit] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [rain, setRain] = useState(false);
+  const [atcOk, setAtcOk] = useState(false);
+  const [savedItems, setSavedItems] = useState([]); // tal como quedó guardado (para la vista cerrada)
   const [history, setHistory] = useState([]);
   const [openIssues, setOpenIssues] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -59,8 +63,8 @@ export default function TragamonedasCheck() {
     setLoading(true);
     const [{ data: b }, { data: cfg }, { data: chk }, { data: open }] = await Promise.all([
       supabase.from('branches').select('id, code, name, city').eq('id', branchId).single(),
-      supabase.from('slot_branch_config').select('machine_count').eq('branch_id', branchId).maybeSingle(),
-      supabase.from('slot_checks').select('id, operator_id, notes, created_at').eq('branch_id', branchId).eq('control_date', controlDate).eq('slot', slot).maybeSingle(),
+      supabase.from('slot_branch_config').select('machine_count, atc_ok').eq('branch_id', branchId).maybeSingle(),
+      supabase.from('slot_checks').select('id, operator_id, notes, created_at, rain').eq('branch_id', branchId).eq('control_date', controlDate).eq('slot', slot).maybeSingle(),
       supabase.from('slot_open_issues').select('*').eq('branch_id', branchId),
     ]);
     setBranch(b || null);
@@ -80,9 +84,13 @@ export default function TragamonedasCheck() {
       if (st) status = st;
       loadHistory(chk.id);
       setNotes(chk.notes || '');
+      setRain(!!chk.rain);
     } else {
       setHistory([]);
+      setRain(false);
     }
+    setSavedItems(prevItems);
+    setAtcOk(!!cfg?.atc_ok);
     setExisting(ex);
     setCanEdit(!!status.can_edit);
     setIsAdmin(!!status.is_admin);
@@ -101,7 +109,10 @@ export default function TragamonedasCheck() {
         setItems(
           Array.from({ length: cfg.machine_count }, (_, i) => {
             const old = prevItems.find((x) => x.machine_no === i + 1);
-            return old ? { ...old, observation: old.observation || '' } : newItem(i + 1);
+            // Se reconstruye lo que realmente se vio (antes de aplicar justificaciones).
+            return old
+              ? { ...old, is_outside: old.inside_excuse ? false : old.is_outside, far_from_atc: old.atc_excuse ? false : old.far_from_atc, observation: old.observation || '' }
+              : newItem(i + 1);
           })
         );
         setPhase(ex && !status.can_edit ? 'readonly' : 'checklist');
@@ -164,7 +175,8 @@ export default function TragamonedasCheck() {
 
   const setItem = (idx, patch) => setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
 
-  const problems = useMemo(() => items.filter((it) => issuesOf(it).length > 0), [items]);
+  const ctx = useMemo(() => ({ rain, atcOk }), [rain, atcOk]);
+  const problems = useMemo(() => items.filter((it) => issuesEff(it, ctx).length > 0), [items, ctx]);
 
   // Problemas de controles ANTERIORES que siguen sin resolver, por máquina.
   const priorByMachine = useMemo(() => {
@@ -184,8 +196,9 @@ export default function TragamonedasCheck() {
     setError('');
     const payload = items.map((it) => ({
       machine_no: it.machine_no,
-      is_outside: it.is_outside,
-      far_from_atc: it.far_from_atc,
+      // En sucursales con regla ATC esas dos preguntas no se hacen: van como correctas.
+      is_outside: atcOk ? true : it.is_outside,
+      far_from_atc: atcOk ? true : it.far_from_atc,
       is_operating: it.is_operating,
       observation: it.observation || null,
     }));
@@ -196,6 +209,7 @@ export default function TragamonedasCheck() {
       p_machine_count: items.length,
       p_items: payload,
       p_notes: notes || null,
+      p_rain: rain,
     });
     setSaving(false);
     if (err) {
@@ -320,8 +334,29 @@ export default function TragamonedasCheck() {
             <button className="text-brand font-semibold hover:underline" onClick={() => setPhase('count')}>Cambiar cantidad</button>
           </div>
           <div className="text-[11.5px] text-text3 mb-3">
-            <b className="text-orange">Sin sacar</b>, <b className="text-orange">Cerca del ATC</b> y <b className="text-orange">Apagado</b> cuentan como problema y quedan registrados como incidencia.
+            {atcOk ? (
+              <>Esta sucursal tiene el tragamonedas junto al ATC para funcionar: <b className="text-orange">solo “Apagado” cuenta como problema</b>.</>
+            ) : (
+              <><b className="text-orange">Sin sacar</b>, <b className="text-orange">Cerca del ATC</b> y <b className="text-orange">Apagado</b> cuentan como problema y quedan registrados como incidencia.</>
+            )}
           </div>
+
+          {!atcOk && (
+            <div
+              onClick={() => setRain((v) => !v)}
+              className={`card !p-3.5 mb-3 flex items-center justify-between gap-3 cursor-pointer ${rain ? 'border-brand/60' : ''}`}
+            >
+              <div>
+                <div className="text-[13px] font-semibold">Está lloviendo</div>
+                <div className="text-[11.5px] text-text3">
+                  Los tragamonedas que no se sacaron pero están encendidos no cuentan como problema. Si alguno está apagado, sigue contando.
+                </div>
+              </div>
+              <div className={`w-11 h-6 rounded-full p-0.5 transition-colors shrink-0 ${rain ? 'bg-brand' : 'bg-surface3'}`}>
+                <div className={`w-5 h-5 rounded-full bg-white transition-transform ${rain ? 'translate-x-5' : ''}`} />
+              </div>
+            </div>
+          )}
 
           {priorCount > 0 && (
             <div className="card !py-3 mb-3 border-orange/50">
@@ -332,13 +367,14 @@ export default function TragamonedasCheck() {
 
           <div className="flex flex-col gap-3 mb-4">
             {items.map((it, idx) => {
-              const issues = issuesOf(it);
-              const prior = priorByMachine[it.machine_no] || [];
+              const issues = issuesEff(it, ctx);
+              const excused = isRainExcused(it, rain, atcOk);
+              const prior = (priorByMachine[it.machine_no] || []).filter((o) => !atcOk || o.issue_key === 'not_operating');
               return (
                 <div key={it.machine_no} className={`card !p-4 ${issues.length ? 'border-orange/50' : ''}`}>
                   <div className="flex items-center justify-between mb-3">
                     <div className="font-semibold text-sm">Tragamonedas #{it.machine_no}</div>
-                    {issues.length > 0 ? <Badge className="badge-orange">{issues.length} problema{issues.length > 1 ? 's' : ''}</Badge> : <Badge className="badge-green">Todo en orden</Badge>}
+                    {issues.length > 0 ? <Badge className="badge-orange">{issues.length} problema{issues.length > 1 ? 's' : ''}</Badge> : excused ? <Badge className="badge-neutral">Sin sacar por lluvia</Badge> : <Badge className="badge-green">Todo en orden</Badge>}
                   </div>
 
                   {prior.length > 0 && (
@@ -361,7 +397,7 @@ export default function TragamonedasCheck() {
                   )}
 
                   <div className="flex flex-col gap-2.5">
-                    {SLOT_CHECKS.map((c) => (
+                    {SLOT_CHECKS.filter((c) => !atcOk || c.key === 'is_operating').map((c) => (
                       <div key={c.key} className="flex items-center justify-between gap-3 flex-wrap">
                         <span className="text-[12.8px] text-text2">{c.label}</span>
                         <div className="flex gap-1.5">
@@ -383,6 +419,7 @@ export default function TragamonedasCheck() {
                       </div>
                     ))}
                   </div>
+                  {excused && <div className="text-[11.5px] text-text3 mt-2">Sin sacar justificado por la lluvia (está encendido).</div>}
                   {issues.length > 0 && (
                     <textarea
                       className="input min-h-[60px] resize-none mt-3"
@@ -420,7 +457,7 @@ export default function TragamonedasCheck() {
               <div className="font-bold text-[15.5px] mb-2">Confirmar control de las {slot}</div>
               {problems.length === 0 ? (
                 <p className="text-[13px] text-text2 leading-relaxed mb-5">
-                  ¿Confirmás que los {items.length} tragamonedas de <b className="text-text">{branch.code} — {branch.name}</b> están afuera, alejados del ATC y funcionando?
+                  ¿Confirmás que los {items.length} tragamonedas de <b className="text-text">{branch.code} — {branch.name}</b> están {atcOk ? 'funcionando' : rain && items.some((i) => i.is_outside === false) ? 'funcionando (algunos sin sacar por la lluvia)' : 'afuera, alejados del ATC y funcionando'}?
                 </p>
               ) : (
                 <div className="mb-5">
@@ -428,7 +465,7 @@ export default function TragamonedasCheck() {
                   <div className="flex flex-col gap-1.5">
                     {problems.map((p) => (
                       <div key={p.machine_no} className="text-[12.5px] bg-surface2 border border-border rounded-lg px-3 py-2">
-                        <b>#{p.machine_no}</b> — {issuesOf(p).join(', ')}
+                        <b>#{p.machine_no}</b> — {issuesEff(p, ctx).map((c) => c.issue).join(', ')}
                       </div>
                     ))}
                   </div>
@@ -452,15 +489,16 @@ export default function TragamonedasCheck() {
             Este informe está cerrado: pasaron más de {EDIT_WINDOW_SECONDS} segundos desde que se guardó. Solo un Administrador puede modificarlo.
           </div>
           <div className="flex flex-col gap-3 mb-4">
-            {items.map((it) => {
-              const issues = issuesOf(it);
+            {savedItems.map((it) => {
+              const issues = SLOT_CHECKS.filter((c) => it[c.key] === false).map((c) => c.issue);
+              const excuse = it.inside_excuse || it.atc_excuse;
               return (
                 <div key={it.machine_no} className={`card !p-4 ${issues.length ? 'border-orange/50' : ''}`}>
                   <div className="flex items-center justify-between">
                     <div className="font-semibold text-sm">Tragamonedas #{it.machine_no}</div>
                     {issues.length > 0 ? (
                       <div className="flex gap-1 flex-wrap justify-end">{issues.map((x) => <Badge key={x} className={x === 'Apagado' ? 'badge-red' : 'badge-orange'}>{x}</Badge>)}</div>
-                    ) : <Badge className="badge-green">Todo en orden</Badge>}
+                    ) : excuse ? <Badge className="badge-neutral">{EXCUSE_LABEL[it.inside_excuse || it.atc_excuse]}</Badge> : <Badge className="badge-green">Todo en orden</Badge>}
                   </div>
                   {it.observation && <div className="text-[12.5px] text-text2 mt-2">{it.observation}</div>}
                 </div>

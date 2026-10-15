@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient.js';
 import Badge from '../components/Badge.jsx';
 import Kpi from '../components/Kpi.jsx';
-import TragamonedasResumen from '../components/TragamonedasResumen.jsx';
+import { TragamonedasResumen } from './TragamonedasPanel.jsx';
 import { IconSearch } from '../components/icons.jsx';
 import { ROLE_LABEL } from '../lib/format.js';
-import { SLOT_TIMES, currentControlDate, suggestedSlot, isSlotInFuture, fmtControlDate } from '../lib/slots.js';
+import { slotTimesFor, currentControlDate, suggestedSlot, isSlotInFuture, fmtControlDate } from '../lib/slots.js';
 
 // Estados posibles de una sucursal para el horario elegido.
 const ESTADO = {
@@ -114,7 +114,7 @@ export default function TragamonedasControl() {
       <TragamonedasResumen branches={branches} configMap={configMap} />
 
       <div className="flex gap-1 bg-surface border border-border rounded-[10px] p-1 w-fit mb-3">
-        {SLOT_TIMES.map((s) => (
+        {slotTimesFor(controlDate).map((s) => (
           <div
             key={s}
             onClick={() => { setSlot(s); setEstado('todas'); }}

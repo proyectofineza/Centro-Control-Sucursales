@@ -5,7 +5,7 @@ import Kpi from '../components/Kpi.jsx';
 import { IconSearch } from '../components/icons.jsx';
 import { downloadCsv, ROLE_LABEL } from '../lib/format.js';
 import {
-  SLOT_TIMES, SLOT_CHECKS, ISSUE_BY_KEY, describeChanges, fmtDateTimePy, currentControlDate, addDays, fmtControlDate, issuesOf,
+  allSlotTimes, slotTimesFor, SLOT_CHECKS, ISSUE_BY_KEY, describeChanges, fmtDateTimePy, currentControlDate, addDays, fmtControlDate, issuesOf,
   weekRange, monthRange, addMonths, fmtMonthLabel, fmtShortDate,
   datesUpToToday, expectedChecksPerBranch, expectedDaysForSlot,
 } from '../lib/slots.js';
@@ -319,6 +319,7 @@ function DayView({ date, today, branches, configMap, filters }) {
   const [issues, setIssues] = useState([]);
   const [trend, setTrend] = useState([]);
   const [history, setHistory] = useState([]);
+  const [excused, setExcused] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -326,13 +327,15 @@ function DayView({ date, today, branches, configMap, filters }) {
     (async () => {
       setLoading(true);
       const from = addDays(date, -6);
-      const [{ data: chk }, { data: iss }, { data: week }, { data: hist }] = await Promise.all([
-        supabase.from('slot_checks').select('branch_id, slot, has_incident, machine_count').eq('control_date', date),
+      const [{ data: chk }, { data: iss }, { data: week }, { data: hist }, { data: exc }] = await Promise.all([
+        supabase.from('slot_checks').select('branch_id, slot, has_incident, machine_count, rain').eq('control_date', date),
         supabase.from('slot_items_detailed').select('*').eq('control_date', date).eq('has_issue', true).order('slot').order('branch_code'),
         supabase.from('slot_daily_summary').select('*').gte('control_date', from).lte('control_date', date),
         supabase.from('slot_history_detailed').select('*').eq('control_date', date).order('edited_at', { ascending: false }),
+        supabase.from('slot_items_detailed').select('check_id, branch_code, branch_name, branch_city, slot, machine_no, operator_name, operator_role').eq('control_date', date).eq('inside_excuse', 'lluvia').order('slot').order('branch_code'),
       ]);
       if (!alive) return;
+      setExcused(exc || []);
       setHistory(hist || []);
       setChecks(chk || []);
       setIssues(iss || []);
@@ -344,6 +347,7 @@ function DayView({ date, today, branches, configMap, filters }) {
     };
   }, [date]);
 
+  const daySlots = useMemo(() => slotTimesFor(date), [date]);
   const withMachines = useMemo(() => branches.filter((b) => (configMap[b.id] || 0) > 0), [branches, configMap]);
 
   const checkMap = useMemo(() => {
@@ -354,11 +358,11 @@ function DayView({ date, today, branches, configMap, filters }) {
 
   const perSlot = useMemo(
     () =>
-      SLOT_TIMES.map((s) => {
+      daySlots.map((s) => {
         const done = checks.filter((c) => c.slot === s);
         return { slot: s, done: done.length, withIssue: done.filter((c) => c.has_incident).length, total: withMachines.length };
       }),
-    [checks, withMachines]
+    [checks, withMachines, daySlots]
   );
 
   const q = search.trim().toLowerCase();
@@ -367,7 +371,7 @@ function DayView({ date, today, branches, configMap, filters }) {
     let list = withMachines;
     if (cityFilter) list = list.filter((b) => b.city === cityFilter);
     if (q) list = list.filter((b) => matchesText(q, b.code, b.name, b.city));
-    if (onlyIssues) list = list.filter((b) => SLOT_TIMES.some((s) => checkMap[`${b.id}|${s}`]?.has_incident));
+    if (onlyIssues) list = list.filter((b) => daySlots.some((s) => checkMap[`${b.id}|${s}`]?.has_incident));
     return list;
   }, [withMachines, cityFilter, q, onlyIssues, checkMap]);
 
@@ -378,6 +382,18 @@ function DayView({ date, today, branches, configMap, filters }) {
     return list;
   }, [issues, cityFilter, q]);
 
+  // Controles con "Sin sacar" justificado por lluvia, agrupados por control.
+  const excusedRows = useMemo(() => {
+    const map = new Map();
+    excused.forEach((e) => {
+      if (cityFilter && e.branch_city !== cityFilter) return;
+      if (q && !matchesText(q, e.branch_code, e.branch_name, e.branch_city)) return;
+      if (!map.has(e.check_id)) map.set(e.check_id, { ...e, machines: [] });
+      map.get(e.check_id).machines.push(e.machine_no);
+    });
+    return [...map.values()];
+  }, [excused, cityFilter, q]);
+
   const historyRows = useMemo(() => {
     let list = history;
     if (cityFilter) list = list.filter((h) => h.branch_city === cityFilter);
@@ -386,9 +402,9 @@ function DayView({ date, today, branches, configMap, filters }) {
   }, [history, cityFilter, q]);
 
   const trendDays = useMemo(() => {
-    const expected = withMachines.length * SLOT_TIMES.length;
     return Array.from({ length: 7 }, (_, i) => {
       const d = addDays(date, i - 6);
+      const expected = withMachines.length * slotTimesFor(d).length;
       const day = trend.find((c) => c.control_date === d);
       const done = day?.checks_done || 0;
       return { date: d, done, withIssue: day?.checks_with_incident || 0, pct: expected ? Math.min(100, Math.round((done / expected) * 100)) : 0 };
@@ -414,7 +430,7 @@ function DayView({ date, today, branches, configMap, filters }) {
 
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      <div className={`grid grid-cols-2 ${daySlots.length > 4 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-3 mb-4`}>
         {perSlot.map((p) => (
           <Kpi
             key={p.slot}
@@ -435,22 +451,27 @@ function DayView({ date, today, branches, configMap, filters }) {
         <div className="overflow-x-auto">
           <table className="datatable">
             <thead>
-              <tr><th>Código</th><th>Sucursal</th><th>Ciudad</th><th>Máquinas</th>{SLOT_TIMES.map((s) => <th key={s}>{s}</th>)}</tr>
+              <tr><th>Código</th><th>Sucursal</th><th>Ciudad</th><th>Máquinas</th>{daySlots.map((s) => <th key={s}>{s}</th>)}</tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={4 + SLOT_TIMES.length} className="text-center text-text3 py-8">Cargando…</td></tr>}
-              {!loading && matrixRows.length === 0 && <tr><td colSpan={4 + SLOT_TIMES.length} className="text-center text-text3 py-8">No hay sucursales para este filtro.</td></tr>}
+              {loading && <tr><td colSpan={4 + daySlots.length} className="text-center text-text3 py-8">Cargando…</td></tr>}
+              {!loading && matrixRows.length === 0 && <tr><td colSpan={4 + daySlots.length} className="text-center text-text3 py-8">No hay sucursales para este filtro.</td></tr>}
               {!loading && matrixRows.map((b) => (
                 <tr key={b.id}>
                   <td className="font-mono text-text2">{b.code}</td>
                   <td className="font-medium">{b.name}</td>
                   <td className="text-text2">{b.city}</td>
                   <td className="font-mono">{configMap[b.id]}</td>
-                  {SLOT_TIMES.map((s) => {
+                  {daySlots.map((s) => {
                     const c = checkMap[`${b.id}|${s}`];
                     return (
                       <td key={s}>
-                        {!c ? <Badge className="badge-neutral">Sin control</Badge> : c.has_incident ? <Badge className="badge-orange">Incidencia</Badge> : <Badge className="badge-green">OK</Badge>}
+                        {!c ? <Badge className="badge-neutral">Sin control</Badge> : (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {c.has_incident ? <Badge className="badge-orange">Incidencia</Badge> : <Badge className="badge-green">OK</Badge>}
+                            {c.rain && <span className="text-[10.5px] text-text3">lluvia</span>}
+                          </div>
+                        )}
                       </td>
                     );
                   })}
@@ -495,6 +516,30 @@ function DayView({ date, today, branches, configMap, filters }) {
         </div>
       </div>
 
+      {excusedRows.length > 0 && (
+        <div className="card !p-0 overflow-hidden mb-4">
+          <div className="px-4 pt-3.5 pb-1 text-sm font-semibold">Justificados por lluvia ({excusedRows.length})</div>
+          <div className="px-4 pb-2 text-[11.5px] text-text3">
+            Tragamonedas que no se sacaron por la lluvia y estaban encendidos. No cuentan como problema ni para penalidades.
+          </div>
+          <div className="overflow-x-auto">
+            <table className="datatable">
+              <thead><tr><th>Horario</th><th>Sucursal</th><th>Máquinas</th><th>Reportó</th></tr></thead>
+              <tbody>
+                {excusedRows.map((e) => (
+                  <tr key={e.check_id}>
+                    <td className="font-mono">{e.slot}</td>
+                    <td><span className="font-mono text-text3 mr-1.5">{e.branch_code}</span>{e.branch_name}<div className="text-[11px] text-text3">{e.branch_city}</div></td>
+                    <td className="font-mono">{e.machines.map((m) => `#${m}`).join(', ')}</td>
+                    <td className="text-text2">{reporterOf(e.operator_name, e.operator_role)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="card !p-0 overflow-hidden mb-4">
         <div className="px-4 pt-3.5 pb-1 text-sm font-semibold">Historial de ediciones del día ({historyRows.length})</div>
         <div className="px-4 pb-2 text-[11.5px] text-text3">
@@ -528,7 +573,7 @@ function DayView({ date, today, branches, configMap, filters }) {
 
       <div className="card">
         <div className="text-sm font-semibold mb-1">Últimos 7 días</div>
-        <div className="text-[11.5px] text-text3 mb-3.5">Controles realizados sobre los esperados ({withMachines.length} sucursales × {SLOT_TIMES.length} horarios por día)</div>
+        <div className="text-[11.5px] text-text3 mb-3.5">Controles realizados sobre los esperados ({withMachines.length} sucursales × los horarios que corresponden a cada día)</div>
         <div className="flex flex-col gap-3">
           {trendDays.map((d) => (
             <div key={d.date}>
@@ -602,13 +647,13 @@ function PeriodView({ mode, from, to, closed, branches, configMap, filters }) {
 
   const perSlot = useMemo(
     () =>
-      SLOT_TIMES.map((s) => {
+      allSlotTimes().map((s) => {
         const mine = slotDays.filter((x) => x.slot === s);
         const done = mine.reduce((a, x) => a + x.checks_done, 0);
         const withIssue = mine.reduce((a, x) => a + x.checks_with_incident, 0);
         const expected = nBranches * expectedDaysForSlot(from, to, s);
         return { slot: s, done, withIssue, expected, pct: expected ? Math.min(100, Math.round((done / expected) * 100)) : 0 };
-      }),
+      }).filter((p) => p.expected > 0 || p.done > 0),
     [slotDays, nBranches, from, to]
   );
 

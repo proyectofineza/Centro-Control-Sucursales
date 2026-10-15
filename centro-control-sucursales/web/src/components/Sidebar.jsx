@@ -27,6 +27,8 @@ const NAV = [
 
 const NAV_ADMIN = [
   { to: '/usuarios', label: 'Usuarios', Icon: IconUsers, roles: ['admin'] },
+  { to: '/tragamonedas/horarios', label: 'Horarios tragamonedas', Icon: IconSlot, roles: ['admin'] },
+  { to: '/tragamonedas/reglas', label: 'Reglas tragamonedas', Icon: IconSlot, roles: ['admin'] },
   { to: '/auditoria', label: 'Auditoría', Icon: IconAudit, roles: ['admin'] },
   { to: '/configuracion', label: 'Configuración', Icon: IconSettings, roles: ['admin'] },
 ];

@@ -21,6 +21,9 @@ import TragamonedasControl from './pages/TragamonedasControl.jsx';
 import TragamonedasCheck from './pages/TragamonedasCheck.jsx';
 import TragamonedasPanel from './pages/TragamonedasPanel.jsx';
 import TragamonedasPenalidades from './pages/TragamonedasPenalidades.jsx';
+import TragamonedasHorarios from './pages/TragamonedasHorarios.jsx';
+import TragamonedasReglas from './pages/TragamonedasReglas.jsx';
+import { ScheduleGate } from './lib/schedule.jsx';
 
 const ALL = ['admin', 'supervisor', 'monitoreo', 'rrhh', 'tragamonedas'];
 
@@ -32,7 +35,9 @@ export default function App() {
       <Route
         element={
           <ProtectedRoute roles={ALL}>
-            <Layout />
+            <ScheduleGate>
+              <Layout />
+            </ScheduleGate>
           </ProtectedRoute>
         }
       >
@@ -50,6 +55,8 @@ export default function App() {
         <Route path="/tragamonedas/control/:branchId" element={<ProtectedRoute roles={['admin', 'monitoreo']}><TragamonedasCheck /></ProtectedRoute>} />
         <Route path="/tragamonedas/panel" element={<ProtectedRoute roles={['admin', 'supervisor', 'tragamonedas']}><TragamonedasPanel /></ProtectedRoute>} />
         <Route path="/tragamonedas/penalidades" element={<ProtectedRoute roles={['admin', 'supervisor', 'tragamonedas']}><TragamonedasPenalidades /></ProtectedRoute>} />
+        <Route path="/tragamonedas/horarios" element={<ProtectedRoute roles={['admin']}><TragamonedasHorarios /></ProtectedRoute>} />
+        <Route path="/tragamonedas/reglas" element={<ProtectedRoute roles={['admin']}><TragamonedasReglas /></ProtectedRoute>} />
         <Route path="/usuarios" element={<ProtectedRoute roles={['admin']}><Usuarios /></ProtectedRoute>} />
         <Route path="/auditoria" element={<ProtectedRoute roles={['admin']}><Auditoria /></ProtectedRoute>} />
         <Route path="/configuracion" element={<ProtectedRoute roles={['admin']}><Configuracion /></ProtectedRoute>} />
